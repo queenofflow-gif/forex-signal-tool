@@ -1,6 +1,7 @@
 {
   "name": "forex-signal-tool",
   "version": "1.0.0",
+  "homepage": "https://queenofflow-gif.github.io/forex-signal-tool",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
