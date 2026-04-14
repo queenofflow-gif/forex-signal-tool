@@ -1,10 +1,10 @@
 {
   "files": {
-    "main.js": "/forex-signal-tool/static/js/main.36e7369e.js",
+    "main.js": "/forex-signal-tool/static/js/main.349f10b2.js",
     "index.html": "/forex-signal-tool/index.html",
-    "main.36e7369e.js.map": "/forex-signal-tool/static/js/main.36e7369e.js.map"
+    "main.349f10b2.js.map": "/forex-signal-tool/static/js/main.349f10b2.js.map"
   },
   "entrypoints": [
-    "static/js/main.36e7369e.js"
+    "static/js/main.349f10b2.js"
   ]
 }
