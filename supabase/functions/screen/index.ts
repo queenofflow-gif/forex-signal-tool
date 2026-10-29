@@ -14,6 +14,7 @@ Deno.serve(async (req) => {
   const { data: cred } = await db.rpc("get_oanda_token", { p_user: uid }).maybeSingle();
   if (!cred) return json({ error: "No OANDA token" }, 400);
   const pairs: string[] = (body.pairs || []).filter((p: string) => (PAIRS as any)[p]).slice(0, 20);
+  const only: string[] | null = Array.isArray(body.strategies) ? body.strategies : null;
   const prices = await pricing(cred as Cred, pairs);
   const out = [];
   for (const pair of pairs) {
@@ -21,10 +22,10 @@ Deno.serve(async (req) => {
       const c = await candles(cred as Cred, pair, tf.key, CANDLE_COUNT);
       const now = prices[pair]?.spreadPips ?? null;
       const cost = Math.max((PAIRS as any)[pair].typicalSpread, now ?? 0);
-      const ev = evaluate(c, pair, tf.key, cost);
+      const ev = evaluate(c, pair, tf.key, cost, { experimental: true });
       out.push({
         pair, spreadNow: now && +now.toFixed(1), cost: +cost.toFixed(1), from: new Date(ev.startTime).toISOString().slice(0, 10),
-        results: ev.results.map((r: any) => ({
+        results: ev.results.filter((r: any) => !only || only.includes(r.key)).map((r: any) => ({
           s: r.key, v: r.verdict, n: r.unseen.n, wr: Math.round(r.unseen.winRate * 100), avg: +r.unseen.avgR.toFixed(2),
           pf: +Math.min(r.unseen.pf, 99).toFixed(2), streak: r.unseen.worstStreak, p: r.params,
         })),

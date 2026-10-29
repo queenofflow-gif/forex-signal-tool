@@ -238,7 +238,7 @@ export const STRATEGIES = [
   },
   {
     key: "nybreak", name: "New York breakout", author: "Session range breakout", style: "London-morning range, traded in New York",
-    timeframes: ["M15", "H1"], warmup: () => 40,
+    timeframes: ["M15", "H1"], warmup: () => 40, experimental: true, // no edge found on OANDA H1 data (Oct 2026)
     // Hours are New York time. Range from..to, entries on candles closing after `to` and by `until`.
     grid: [{ from: 3, to: 9, until: 13 }, { from: 3, to: 9, until: 12 }, { from: 7, to: 9, until: 13 }],
     rules: (p, tf) => `Mark the high and low from ${nyClock(p.from)} to ${nyClock(p.to)} New York time (${ctClock(p.from)}–${ctClock(p.to)} Central). Enter when a ${tf.long} candle closes outside that range between ${ctClock(p.to)} and ${ctClock(p.until)} Central. Stop at the range midpoint (at least half an ATR). TP1 at 1R, TP2 at 2R.`,
@@ -264,7 +264,7 @@ export const STRATEGIES = [
   },
   {
     key: "overnight", name: "Overnight stop orders", author: "London breakout, set before bed", style: "Pending orders",
-    timeframes: ["H1"], warmup: () => 40, pending: true,
+    timeframes: ["H1"], warmup: () => 40, pending: true, experimental: true, // no edge found on OANDA H1 data (Oct 2026)
     // Hours are UTC. Range 00:00..`to`; the two stop orders are sent at `to` and expire at `until`.
     grid: [{ to: 5, until: 10 }, { to: 5, until: 12 }, { to: 4, until: 10 }],
     rules: (p) => `At ${utcToCt(p.to)} Central the bot sends two pending orders around the overnight range (00:00–${String(p.to).padStart(2, "0")}:00 UTC): a buy stop just above the high and a sell stop just below the low. Whichever triggers first is the trade; cancel the other. Orders expire at ${utcToCt(p.until)} Central. Stop at the range midpoint (at least the timeframe minimum). TP1 at 1R, TP2 at 2R.`,
@@ -292,7 +292,8 @@ export const STRATEGIES = [
   },
 ];
 export const STRATEGY_BY_KEY = Object.fromEntries(STRATEGIES.map((s) => [s.key, s]));
-export const strategiesFor = (tfKey) => STRATEGIES.filter((s) => s.timeframes.includes(tfOf(tfKey).key));
+// Experimental strategies are only run by the screening tool, never shown or alerted.
+export const strategiesFor = (tfKey, opts = {}) => STRATEGIES.filter((s) => s.timeframes.includes(tfOf(tfKey).key) && (opts.experimental || !s.experimental));
 
 // ── Trade levels and simulation ───────────────────────────────
 export function levels(dir, entry, sl) {
@@ -425,10 +426,10 @@ export function verdictFor(tune, unseen) {
 }
 
 // Walk-forward: pick settings on the first 60%, judge them on the last 40%.
-export function evaluate(candles, pair, tfKey = DEFAULT_TF, spreadPips) {
+export function evaluate(candles, pair, tfKey = DEFAULT_TF, spreadPips, opts = {}) {
   const x = makeCtx(candles, tfKey), n = candles.length, split = Math.floor(n * TUNE_SHARE);
   const sp = spreadPips ?? PAIRS[pair].typicalSpread;
-  const results = strategiesFor(tfKey).map((st) => {
+  const results = strategiesFor(tfKey, opts).map((st) => {
     let best = null;
     for (const p of st.grid) {
       const s = stats(runSim(x, st, p, 0, split, pair, sp));
