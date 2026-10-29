@@ -1,7 +1,7 @@
 // Shared live-market store: candles + strategy evaluation per pair, and polled prices.
 import { useEffect, useReducer } from "react";
 import { oanda } from "./supabase";
-import { evaluate, lastCompleteIndex, CANDLE_COUNT, CONVERSION_PAIRS, DEFAULT_TF } from "../engine/engine";
+import { evaluate, lastCompleteIndex, CANDLE_COUNT, conversionPairsFor, DEFAULT_TF } from "../engine/engine";
 
 const store = { pairs: {}, prices: {}, priceError: null };
 const listeners = new Set();
@@ -64,7 +64,7 @@ export function useMarket(pair, tf = DEFAULT_TF) {
 let pollers = 0, timer = null;
 const wanted = new Map();
 async function pollPrices() {
-  const pairs = [...new Set([...wanted.keys(), ...CONVERSION_PAIRS])];
+  const pairs = [...new Set([...wanted.keys(), ...conversionPairsFor([...wanted.keys()])])];
   if (!pairs.length) return;
   try { Object.assign(store.prices, await oanda.pricing(pairs)); store.priceError = null; }
   catch (e) { store.priceError = e.message; }

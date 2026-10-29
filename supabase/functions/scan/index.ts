@@ -6,6 +6,7 @@ import { candles, pricing, Cred, Price } from "../_shared/oanda.ts";
 import { send, esc, botToken } from "../_shared/telegram.ts";
 import {
   PAIRS, CANDLE_COUNT, evaluate, liveSignals, sizeTrade, accountState, preTradeChecks, fmtPrice, lastCompleteIndex, tfOf,
+  conversionPairsFor,
 } from "../_shared/engine.js";
 
 const db = admin();
@@ -84,7 +85,8 @@ async function scanUser(uid: string) {
   const cred = credRow as Cred;
   const tf = tfOf(profile.timeframe);
   const pairs: string[] = (profile.pairs || []).filter((p: string) => (PAIRS as any)[p]);
-  const prices = await pricing(cred, [...new Set([...pairs, "AUD_USD", ...(trades || []).filter((t: any) => t.status === "open").map((t: any) => t.pair)])]);
+  const watched = [...new Set([...pairs, ...(trades || []).filter((t: any) => t.status === "open").map((t: any) => t.pair)])];
+  const prices = await pricing(cred, [...new Set([...watched, ...conversionPairsFor(watched)])]);
   const rates: Record<string, number> = {};
   for (const [k, v] of Object.entries(prices)) rates[k] = v.mid;
   const open = (trades || []).filter((t: any) => t.status === "open");

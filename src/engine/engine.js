@@ -9,7 +9,25 @@ export const PAIRS = {
   XAU_USD: { label: "Gold", pip: 0.1, base: "XAU", quote: "USD", digits: 2, typicalSpread: 4.0, contract: 100 },
   GBP_AUD: { label: "GBP/AUD", pip: 0.0001, base: "GBP", quote: "AUD", digits: 5, typicalSpread: 4.5, contract: 100000 },
   USD_JPY: { label: "USD/JPY", pip: 0.01, base: "USD", quote: "JPY", digits: 3, typicalSpread: 1.6, contract: 100000 },
+  USD_CAD: { label: "USD/CAD", pip: 0.0001, base: "USD", quote: "CAD", digits: 5, typicalSpread: 2.0, contract: 100000 },
+  AUD_USD: { label: "AUD/USD", pip: 0.0001, base: "AUD", quote: "USD", digits: 5, typicalSpread: 1.4, contract: 100000 },
+  NZD_USD: { label: "NZD/USD", pip: 0.0001, base: "NZD", quote: "USD", digits: 5, typicalSpread: 1.8, contract: 100000 },
+  USD_CHF: { label: "USD/CHF", pip: 0.0001, base: "USD", quote: "CHF", digits: 5, typicalSpread: 1.8, contract: 100000 },
+  GBP_JPY: { label: "GBP/JPY", pip: 0.01, base: "GBP", quote: "JPY", digits: 3, typicalSpread: 3.0, contract: 100000 },
+  EUR_JPY: { label: "EUR/JPY", pip: 0.01, base: "EUR", quote: "JPY", digits: 3, typicalSpread: 2.0, contract: 100000 },
+  AUD_JPY: { label: "AUD/JPY", pip: 0.01, base: "AUD", quote: "JPY", digits: 3, typicalSpread: 2.0, contract: 100000 },
+  CAD_JPY: { label: "CAD/JPY", pip: 0.01, base: "CAD", quote: "JPY", digits: 3, typicalSpread: 2.6, contract: 100000 },
 };
+// Prices needed to convert a cross pair's profit into USD.
+const USD_LEG = { AUD: "AUD_USD", NZD: "NZD_USD", GBP: "GBP_USD", EUR: "EUR_USD", JPY: "USD_JPY", CAD: "USD_CAD", CHF: "USD_CHF" };
+export function conversionPairsFor(pairs) {
+  const out = new Set();
+  for (const p of pairs) {
+    const cfg = PAIRS[p];
+    if (cfg && cfg.quote !== "USD" && cfg.base !== "USD" && USD_LEG[cfg.quote]) out.add(USD_LEG[cfg.quote]);
+  }
+  return [...out];
+}
 export const CONVERSION_PAIRS = ["AUD_USD"];
 export const CANDLE_COUNT = 5000;
 const TUNE_SHARE = 0.6;
