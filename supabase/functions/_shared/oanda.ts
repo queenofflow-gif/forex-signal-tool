@@ -1,6 +1,6 @@
 // Minimal OANDA v20 REST client. Each call uses the trader's own token.
 // Kept free of engine imports so small functions deploy without it.
-const PIP: Record<string, number> = { EUR_USD: 0.0001, GBP_AUD: 0.0001, USD_JPY: 0.01, AUD_USD: 0.0001 };
+const PIP: Record<string, number> = { EUR_USD: 0.0001, GBP_USD: 0.0001, XAU_USD: 0.1, GBP_AUD: 0.0001, USD_JPY: 0.01, AUD_USD: 0.0001 };
 
 export const HOSTS: Record<string, string> = {
   practice: "https://api-fxpractice.oanda.com",

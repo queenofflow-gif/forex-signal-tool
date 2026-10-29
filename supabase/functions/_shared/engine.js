@@ -2,10 +2,13 @@
 // Pure JavaScript, no imports. Keep it that way: supabase/functions copy this file.
 
 export const PAIRS = {
-  // typicalSpread: conservative OANDA spreads, charged on every backtest trade.
-  EUR_USD: { label: "EUR/USD", pip: 0.0001, base: "EUR", quote: "USD", digits: 5, typicalSpread: 1.4 },
-  GBP_AUD: { label: "GBP/AUD", pip: 0.0001, base: "GBP", quote: "AUD", digits: 5, typicalSpread: 4.5 },
-  USD_JPY: { label: "USD/JPY", pip: 0.01, base: "USD", quote: "JPY", digits: 3, typicalSpread: 1.6 },
+  // typicalSpread: conservative OANDA spreads in pips, charged on every backtest trade.
+  // contract: units per standard lot (100,000 for currencies; 100 oz for gold, where a pip is $0.10).
+  EUR_USD: { label: "EUR/USD", pip: 0.0001, base: "EUR", quote: "USD", digits: 5, typicalSpread: 1.4, contract: 100000 },
+  GBP_USD: { label: "GBP/USD", pip: 0.0001, base: "GBP", quote: "USD", digits: 5, typicalSpread: 1.8, contract: 100000 },
+  XAU_USD: { label: "Gold", pip: 0.1, base: "XAU", quote: "USD", digits: 2, typicalSpread: 4.0, contract: 100 },
+  GBP_AUD: { label: "GBP/AUD", pip: 0.0001, base: "GBP", quote: "AUD", digits: 5, typicalSpread: 4.5, contract: 100000 },
+  USD_JPY: { label: "USD/JPY", pip: 0.01, base: "USD", quote: "JPY", digits: 3, typicalSpread: 1.6, contract: 100000 },
 };
 export const CONVERSION_PAIRS = ["AUD_USD"];
 export const CANDLE_COUNT = 5000;
@@ -333,7 +336,7 @@ export function regime(x) {
 // ── Money ─────────────────────────────────────────────────────
 // rates: { "AUD_USD": 0.66, ... } mid prices for conversion. Account currency USD.
 export function pipValueUSD(pair, price, rates = {}) {
-  const cfg = PAIRS[pair], perLot = 100000 * cfg.pip; // in quote currency
+  const cfg = PAIRS[pair], perLot = (cfg.contract || 100000) * cfg.pip; // in quote currency
   if (cfg.quote === "USD") return perLot;
   if (cfg.base === "USD") return perLot / price;
   const direct = rates[`${cfg.quote}_USD`], inverse = rates[`USD_${cfg.quote}`];
