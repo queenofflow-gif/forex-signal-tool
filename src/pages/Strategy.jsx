@@ -1,15 +1,16 @@
 import { useMemo } from "react";
 import { useData } from "../lib/data";
 import { useMarket, usePrices } from "../lib/market";
-import { STRATEGIES, PAIRS, strategyStatus, fmtR, tfOf, strategiesFor } from "../engine/engine";
+import { STRATEGIES, PAIRS, strategyStatus, fmtR, tfOf, strategiesFor, timeframesOf } from "../engine/engine";
 import PriceChart from "../components/PriceChart";
 import { Head, Card, Verdict, EquityCurve, Loading, ErrorNote, Note, pairLabel, dirLabel, price, pct, when } from "../components/ui";
 
-export default function Strategy({ stratKey, pairParam }) {
+export default function Strategy({ stratKey, pairParam, tfParam }) {
   const d = useData();
   const pairs = d.profile.pairs.filter((p) => PAIRS[p]);
   const pair = pairs.includes(pairParam) ? pairParam : pairs[0];
-  const tf = tfOf(d.profile.timeframe);
+  const tfs = timeframesOf(d.profile);
+  const tf = tfOf(tfs.includes(tfParam) ? tfParam : tfs[0]);
   const m = useMarket(pair, tf.key);
   const { prices } = usePrices([pair]);
   const r = m.ev?.results.find((x) => x.key === stratKey);
@@ -28,16 +29,21 @@ export default function Strategy({ stratKey, pairParam }) {
 
   return (
     <div className="page narrow">
-      <Head back={`#/?pair=${pair}`} sub={`${def.author} · ${def.style}`} title={def.name} />
+      <Head back={`#/?pair=${pair}&tf=${tf.key}`} sub={`${def.author} · ${def.style}`} title={def.name} />
       <div className="seg wide scroll" role="tablist" aria-label="Strategy">
-        {strategiesFor(tf.key).map((s) => <a key={s.key} role="tab" aria-selected={s.key === stratKey} className={s.key === stratKey ? "on" : ""} href={`#/strategy/${s.key}?pair=${pair}`}>{s.name}</a>)}
+        {strategiesFor(tf.key).map((s) => <a key={s.key} role="tab" aria-selected={s.key === stratKey} className={s.key === stratKey ? "on" : ""} href={`#/strategy/${s.key}?pair=${pair}&tf=${tf.key}`}>{s.name}</a>)}
       </div>
+      {tfs.length > 1 && (
+        <div className="seg" role="tablist" aria-label="Timeframe">
+          {tfs.map((k) => <a key={k} role="tab" aria-selected={k === tf.key} className={k === tf.key ? "on" : ""} href={`#/strategy/${stratKey}?pair=${pair}&tf=${k}`}>{tfOf(k).long}</a>)}
+        </div>
+      )}
       <div className="seg wide" role="tablist" aria-label="Pair">
-        {pairs.map((p) => <a key={p} role="tab" aria-selected={p === pair} className={p === pair ? "on" : ""} href={`#/strategy/${stratKey}?pair=${p}`}>{pairLabel(p)}</a>)}
+        {pairs.map((p) => <a key={p} role="tab" aria-selected={p === pair} className={p === pair ? "on" : ""} href={`#/strategy/${stratKey}?pair=${p}&tf=${tf.key}`}>{pairLabel(p)}</a>)}
       </div>
 
       {m.status === "error" && <ErrorNote>{m.error}</ErrorNote>}
-      {!def.timeframes.includes(tf.key) && <Note tone="warn">{def.name} only works on shorter timeframes. Switch to 1-hour in setup to use it.</Note>}
+      {!def.timeframes.includes(tf.key) && <Note tone="warn">{def.name} only works on shorter timeframes. View it on 1-hour candles (add 1-hour in setup if needed).</Note>}
       {!r && m.status !== "error" && def.timeframes.includes(tf.key) && <Loading text="Backtesting on 5,000 candles…" />}
       {r && (
         <>

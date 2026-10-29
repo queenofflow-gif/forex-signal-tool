@@ -1,12 +1,12 @@
 // Scheduled scanner: runs every 2 minutes from pg_cron.
 // 1) Watches open trades for TP1 / TP2 / stop and alerts.
-// 2) On each new candle of the trader's timeframe, evaluates strategies and records signals.
+// 2) On each new candle of each of the trader's timeframes, evaluates strategies and records signals.
 import { admin, cronAuthorized, json, SITE_URL } from "../_shared/common.ts";
 import { candles, pricing, Cred, Price } from "../_shared/oanda.ts";
 import { send, esc, botToken } from "../_shared/telegram.ts";
 import {
   PAIRS, CANDLE_COUNT, evaluate, liveSignals, sizeTrade, accountState, preTradeChecks, fmtPrice, lastCompleteIndex, tfOf,
-  conversionPairsFor,
+  conversionPairsFor, timeframesOf,
 } from "../_shared/engine.js";
 
 const db = admin();
@@ -83,7 +83,7 @@ async function scanUser(uid: string) {
   ]);
   if (!profile || !credRow) return;
   const cred = credRow as Cred;
-  const tf = tfOf(profile.timeframe);
+  const tfs = timeframesOf(profile).map((k: string) => tfOf(k));
   const pairs: string[] = (profile.pairs || []).filter((p: string) => (PAIRS as any)[p]);
   const watched = [...new Set([...pairs, ...(trades || []).filter((t: any) => t.status === "open").map((t: any) => t.pair)])];
   const prices = await pricing(cred, [...new Set([...watched, ...conversionPairsFor(watched)])]);
@@ -98,16 +98,21 @@ async function scanUser(uid: string) {
     await alert(uid, a, "daily", new Date().toISOString().slice(0, 10), `<b>Daily loss at ${Math.round((account.dailyUsed / account.dailyLimit) * 100)}%</b>\nNew signals are paused for the rest of the trading day.`, a?.on_daily_warn);
   }
 
-  await db.from("signals").update({ status: "expired" }).eq("user_id", uid).eq("status", "active").lt("created_at", new Date(Date.now() - tf.expiryHours * 3600e3).toISOString());
+  // Each signal expires on its own timeframe's clock (1h signals after 6h, 4h after 12h...).
+  for (const k of ["M15", "H1", "H4"]) {
+    await db.from("signals").update({ status: "expired" }).eq("user_id", uid).eq("status", "active").eq("granularity", k)
+      .lt("created_at", new Date(Date.now() - tfOf(k).expiryHours * 3600e3).toISOString());
+  }
 
-  const cur: Record<string, any> = Object.fromEntries((cursors || []).map((c: any) => [c.pair, c]));
-  for (const pair of pairs) {
+  const cur: Record<string, any> = Object.fromEntries((cursors || []).map((c: any) => [`${c.pair}|${c.granularity}`, c]));
+  for (const tf of tfs) for (const pair of pairs) {
+    const ck = `${pair}|${tf.key}`;
     try {
       const tail = await candles(cred, pair, tf.key, 3);
       const li = lastCompleteIndex(tail);
       if (li < 0) continue;
       const latest = new Date(tail[li].t).toISOString();
-      if (cur[pair]?.last_candle_time && new Date(cur[pair].last_candle_time).toISOString() === latest) continue;
+      if (cur[ck]?.last_candle_time && new Date(cur[ck].last_candle_time).toISOString() === latest) continue;
 
       const full = await candles(cred, pair, tf.key, CANDLE_COUNT);
       const ev = evaluate(full, pair, tf.key);
@@ -121,7 +126,7 @@ async function scanUser(uid: string) {
       for (const f of fired as any[]) {
         const size = sizeTrade(profile, pair, f.entry, f.sl, rates);
         if (!size.lots) continue;
-        const checks = preTradeChecks(profile, { pair, dir: f.dir }, { spreadPips: spread, stopPips: size.stopPips, openTrades: open as any, account, riskUsd: size.actualRisk });
+        const checks = preTradeChecks(profile, { pair, dir: f.dir, granularity: tf.key }, { spreadPips: spread, stopPips: size.stopPips, openTrades: open as any, account, riskUsd: size.actualRisk });
         const failed = checks.filter((c: any) => c.blocking && !c.ok);
         const row = {
           user_id: uid, pair, granularity: tf.key, strategy: f.strategy, direction: f.dir,
@@ -130,7 +135,7 @@ async function scanUser(uid: string) {
           confluence: f.confluence, trusted: f.trusted, candle_time: new Date(f.candleTime).toISOString(),
           status: failed.length ? "skipped" : "active", skip_reason: failed.map((c: any) => c.label).join("; ") || null,
         };
-        const { data: ins } = await db.from("signals").upsert(row, { onConflict: "user_id,pair,strategy,candle_time", ignoreDuplicates: true }).select("id");
+        const { data: ins } = await db.from("signals").upsert(row, { onConflict: "user_id,pair,granularity,strategy,candle_time", ignoreDuplicates: true }).select("id");
         const id = ins?.[0]?.id;
         if (!id) continue;
         const allowed = f.trusted || !a?.only_trusted;
@@ -147,9 +152,9 @@ async function scanUser(uid: string) {
             a?.on_signal);
         }
       }
-      await db.from("scan_cursor").upsert({ user_id: uid, pair, last_candle_time: latest, last_scan_at: new Date().toISOString(), last_error: null });
+      await db.from("scan_cursor").upsert({ user_id: uid, pair, granularity: tf.key, last_candle_time: latest, last_scan_at: new Date().toISOString(), last_error: null });
     } catch (e) {
-      await db.from("scan_cursor").upsert({ user_id: uid, pair, last_scan_at: new Date().toISOString(), last_error: (e as Error).message.slice(0, 300) });
+      await db.from("scan_cursor").upsert({ user_id: uid, pair, granularity: tf.key, last_scan_at: new Date().toISOString(), last_error: (e as Error).message.slice(0, 300) });
     }
   }
 }

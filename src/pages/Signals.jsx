@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
 import { useData } from "../lib/data";
 import { useMarket, usePrices } from "../lib/market";
-import { regime, strategyStatus, inSession, PAIRS, fmtR, tfOf } from "../engine/engine";
+import { regime, strategyStatus, inSession, PAIRS, fmtR, tfOf, timeframesOf } from "../engine/engine";
 import PriceChart from "../components/PriceChart";
 import { Head, Card, Svg, VerdictChip, Loading, ErrorNote, Note, pairLabel, dirLabel, price, pct, when } from "../components/ui";
 
-export default function Signals({ pairParam }) {
+export default function Signals({ pairParam, tfParam }) {
   const d = useData();
   const pairs = d.profile.pairs.filter((p) => PAIRS[p]);
   const pair = pairs.includes(pairParam) ? pairParam : pairs[0];
-  const tf = tfOf(d.profile.timeframe);
+  const tfs = timeframesOf(d.profile);
+  const tf = tfOf(tfs.includes(tfParam) ? tfParam : tfs[0]);
+  const q = (p, k) => `#/?pair=${p}&tf=${k}`;
   const m = useMarket(pair, tf.key);
   const { prices, error: priceErr } = usePrices(pairs);
   const [markKey, setMarkKey] = useState(null);
@@ -21,20 +23,25 @@ export default function Signals({ pairParam }) {
   const shown = ev ? ev.results.find((r) => r.key === markKey) || ev.results[0] : null;
   const markers = useMemo(() => (shown ? shown.allTrades.map((t) => ({ t: t.t, dir: t.dir, win: t.r > 0, label: t.r > 0 ? "W" : "L" })) : []), [shown]);
 
-  const recent = d.signals.filter((s) => s.pair === pair).slice(0, 6);
+  const recent = d.signals.filter((s) => s.pair === pair && (s.granularity || tfs[0]) === tf.key).slice(0, 6);
   const active = recent.find((s) => s.status === "active" && Date.now() - new Date(s.created_at) < tfOf(s.granularity).expiryHours * 3600e3);
   const lines = active ? [
     { price: active.tp2, color: "#1E3A8A", title: "TP2" }, { price: active.tp1, color: "#2563EB", title: "TP1" },
     { price: active.entry, color: "#3D4652", title: "Entry" }, { price: active.sl, color: "#B45309", title: "SL" },
   ] : [];
-  const cursor = d.cursors.find((c) => c.pair === pair);
+  const cursor = d.cursors.find((c) => c.pair === pair && c.granularity === tf.key);
 
   return (
     <div className="page">
       <Head sub="Forex Signal" title="Signals" />
       <div className="seg wide" role="tablist" aria-label="Currency pair">
-        {pairs.map((p) => <a key={p} role="tab" aria-selected={p === pair} className={p === pair ? "on" : ""} href={`#/?pair=${p}`}>{pairLabel(p)}</a>)}
+        {pairs.map((p) => <a key={p} role="tab" aria-selected={p === pair} className={p === pair ? "on" : ""} href={q(p, tf.key)}>{pairLabel(p)}</a>)}
       </div>
+      {tfs.length > 1 && (
+        <div className="seg" role="tablist" aria-label="Timeframe">
+          {tfs.map((k) => <a key={k} role="tab" aria-selected={k === tf.key} className={k === tf.key ? "on" : ""} href={q(pair, k)}>{tfOf(k).long}</a>)}
+        </div>
+      )}
       <div className="badges">
         {reg && <span className="badge">{reg.label} · ADX {Math.round(reg.adx)}</span>}
         {reg && <span className="badge">Trend ({reg.htfLabel}): {reg.htf === "up" ? "Up" : "Down"}</span>}
@@ -101,7 +108,7 @@ export default function Signals({ pairParam }) {
           {ev && (
             <Card className="list">
               {ev.results.map((r, i) => (
-                <a key={r.key} className="row link rank" href={`#/strategy/${r.key}?pair=${pair}`}>
+                <a key={r.key} className="row link rank" href={`#/strategy/${r.key}?pair=${pair}&tf=${tf.key}`}>
                   <span className="rank-top">
                     <span className="mono faint">{i + 1}</span>
                     <span className="strong grow">{r.name}</span>

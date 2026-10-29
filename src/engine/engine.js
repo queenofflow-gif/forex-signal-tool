@@ -41,6 +41,12 @@ export const TIMEFRAMES = {
 };
 export const DEFAULT_TF = "H4";
 export const tfOf = (key) => TIMEFRAMES[key] || TIMEFRAMES[DEFAULT_TF];
+// A trader can scan several timeframes at once (e.g. 1-hour + 4-hour). Shortest first.
+export const TF_ORDER = ["M15", "H1", "H4"];
+export function timeframesOf(profile) {
+  const list = (profile?.timeframes?.length ? profile.timeframes : [profile?.timeframe || DEFAULT_TF]).filter((k) => TIMEFRAMES[k]);
+  return (list.length ? [...new Set(list)] : [DEFAULT_TF]).sort((a, b) => TF_ORDER.indexOf(a) - TF_ORDER.indexOf(b));
+}
 
 // ── Indicators (all arrays aligned to candle index) ───────────
 export function ema(values, p) {
@@ -564,7 +570,7 @@ export function inSession(ts) {
 
 // Pre-trade checks. Returns [{key,label,ok,detail,blocking}]
 export function preTradeChecks(profile, sig, { spreadPips, stopPips, openTrades = [], account, now = Date.now(), riskUsd }) {
-  const out = [], tf = tfOf(profile.timeframe);
+  const out = [], tf = tfOf(sig.granularity || timeframesOf(profile)[0]);
   const maxSpread = Number((profile.max_spread || {})[sig.pair] ?? PAIRS[sig.pair].typicalSpread * 1.5);
   if (spreadPips != null) {
     out.push({ key: "spread", label: `Spread ${spreadPips.toFixed(1)} pips (max ${maxSpread})`, ok: spreadPips <= maxSpread, detail: spreadPips <= maxSpread ? "OK" : "Too wide", blocking: true });

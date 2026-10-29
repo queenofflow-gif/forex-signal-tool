@@ -63,12 +63,12 @@ export default function App() {
   let page;
   if (!data.profile.setup_done || p[0] === "setup") page = <Setup />;
   else if (p[0] === "signal" && p[1]) page = <SignalDetail id={p[1]} />;
-  else if (p[0] === "strategy") page = <Strategy stratKey={p[1] || "grail"} pairParam={route.query.pair} />;
+  else if (p[0] === "strategy") page = <Strategy stratKey={p[1] || "grail"} pairParam={route.query.pair} tfParam={route.query.tf} />;
   else if (p[0] === "trades" || p[0] === "trade") page = <Trades id={p[1]} />;
   else if (p[0] === "journal") page = <Journal />;
   else if (p[0] === "account") page = <Account />;
   else if (p[0] === "alerts") page = <Alerts />;
-  else page = <Signals pairParam={route.query.pair} />;
+  else page = <Signals pairParam={route.query.pair} tfParam={route.query.tf} />;
 
   return (
     <DataContext.Provider value={data}>

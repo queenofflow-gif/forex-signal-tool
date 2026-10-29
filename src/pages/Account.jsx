@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase, oanda, telegram } from "../lib/supabase";
 import { useData } from "../lib/data";
-import { accountState, PAIRS } from "../engine/engine";
+import { accountState, PAIRS, tfOf } from "../engine/engine";
 import { Head, Card, Meter, Toggle, NumField, Svg, ErrorNote, Note, money, pairLabel, when } from "../components/ui";
 
 export default function Account() {
@@ -186,13 +186,13 @@ function TestAlert() {
 
 function ScannerStatus() {
   const d = useData();
-  if (!d.cursors.length) return <Note>The signal scanner starts within a few minutes of finishing setup. It checks every new candle on your timeframe.</Note>;
+  if (!d.cursors.length) return <Note>The signal scanner starts within a few minutes of finishing setup. It checks every new candle on each of your timeframes.</Note>;
   return (
     <>
       <h2>Scanner</h2>
       <Card className="list">
         {d.cursors.map((c) => (
-          <div key={c.pair} className="row"><span className="grow">{pairLabel(c.pair)}</span>
+          <div key={`${c.pair}|${c.granularity}`} className="row"><span className="grow">{pairLabel(c.pair)} · {tfOf(c.granularity).label}</span>
             <span className={`small ${c.last_error ? "loss" : "muted"}`}>{c.last_error ? `Error: ${c.last_error}` : `Checked ${when(c.last_scan_at)}`}</span></div>
         ))}
       </Card>

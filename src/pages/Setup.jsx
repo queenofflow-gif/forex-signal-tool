@@ -2,6 +2,7 @@ import { useState } from "react";
 import { supabase, oanda } from "../lib/supabase";
 import { useData } from "../lib/data";
 import { go } from "../lib/router";
+import { timeframesOf } from "../engine/engine";
 import { Head, Card, NumField, Stat, ErrorNote, Note, Svg, money } from "../components/ui";
 
 const PRESETS = {
@@ -10,7 +11,7 @@ const PRESETS = {
   custom: { label: "Custom", v: null },
 };
 const TIMEFRAMES = [
-  ["H4", "4-hour candles (recommended)", "1–3 signals a week per pair. Candles close about 8 AM, 12 PM, 4 PM and 8 PM Central, so you can act before work, at lunch and after. Stops of 20–60 pips."],
+  ["H4", "4-hour candles", "1–3 signals a week per pair. Candles close about 8 AM, 12 PM, 4 PM and 8 PM Central, so you can act before work, at lunch and after. Stops of 20–60 pips."],
   ["H1", "1-hour candles", "More signals, checked hourly. Stops of 12–30 pips. Adds the London breakout strategy."],
   ["M15", "15-minute candles", "For watching the screen during London and New York. Tight stops; spread costs matter most."],
 ];
@@ -28,7 +29,8 @@ export default function Setup() {
     preset: p.preset, account_size: p.account_size, max_loss_pct: p.max_loss_pct, max_loss_type: p.max_loss_type,
     daily_loss_pct: p.daily_loss_pct, consistency_pct: p.consistency_pct, risk_pct: p.risk_pct,
   });
-  const [timeframe, setTimeframe] = useState(p.timeframe || "H4");
+  const [timeframes, setTimeframes] = useState(timeframesOf(p));
+  const toggleTf = (k) => setTimeframes((list) => (list.includes(k) ? (list.length > 1 ? list.filter((x) => x !== k) : list) : [...list, k]).sort((a, b) => ["M15", "H1", "H4"].indexOf(a) - ["M15", "H1", "H4"].indexOf(b)));
   const [token, setToken] = useState("");
   const [env, setEnv] = useState("practice");
   const [tokBusy, setTokBusy] = useState(false);
@@ -58,7 +60,7 @@ export default function Setup() {
     const row = {
       preset: f.preset, account_size: acct, max_loss_pct: num(f.max_loss_pct), max_loss_type: f.max_loss_type,
       daily_loss_pct: num(f.daily_loss_pct), consistency_pct: num(f.consistency_pct), risk_pct: num(f.risk_pct),
-      timeframe, setup_done: true, updated_at: new Date().toISOString(),
+      timeframes, timeframe: timeframes[0], setup_done: true, updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("profiles").update(row).eq("user_id", d.uid);
     setBusy(false);
@@ -88,11 +90,12 @@ export default function Setup() {
         </div>
       </Card>
 
-      <h2>How often you trade</h2>
+      <h2>Timeframes to scan</h2>
+      <p className="small muted">Pick one or more. Each is backtested and scanned on its own, and every alert says which timeframe it came from. 1-hour + 4-hour is a good mix for a full-time job.</p>
       <Card className="list">
         {TIMEFRAMES.map(([k, label, hint]) => (
           <label key={k} className="row radio-row">
-            <input type="radio" name="timeframe" value={k} checked={timeframe === k} onChange={() => setTimeframe(k)} />
+            <input type="checkbox" name="timeframes" value={k} checked={timeframes.includes(k)} onChange={() => toggleTf(k)} />
             <span className="grow"><span className="strong">{label}</span><span className="hint">{hint}</span></span>
           </label>
         ))}

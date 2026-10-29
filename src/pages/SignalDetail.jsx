@@ -31,7 +31,7 @@ export default function SignalDetail({ id }) {
   const pv = pipValueUSD(pair, Number(s.entry), rates) || 0;
   const reward2 = Math.floor((lots / 2) * 100) / 100 * Number(s.stop_pips) * pv + (lots - Math.floor((lots / 2) * 100) / 100) * Number(s.stop_pips) * 2 * pv;
   const open = d.trades.filter((t) => t.status === "open");
-  const checks = preTradeChecks(d.profile, { pair, dir: s.direction }, { spreadPips: live?.spreadPips ?? (s.spread_pips == null ? null : Number(s.spread_pips)), stopPips: Number(s.stop_pips), openTrades: open, account, riskUsd: risk });
+  const checks = preTradeChecks(d.profile, { pair, dir: s.direction, granularity: s.granularity }, { spreadPips: live?.spreadPips ?? (s.spread_pips == null ? null : Number(s.spread_pips)), stopPips: Number(s.stop_pips), openTrades: open, account, riskUsd: risk });
   const blocked = checks.filter((c) => c.blocking && !c.ok);
   const fresh = s.status === "active" && Date.now() - new Date(s.created_at) < tf.expiryHours * 3600e3;
   const levelsText = `${dirLabel(s.direction)} ${pairLabel(pair)} ${lots.toFixed(2)} lots\nEntry ${price(pair, s.entry)}\nSL ${price(pair, s.sl)}\nTP1 ${price(pair, s.tp1)}\nTP2 ${price(pair, s.tp2)}`;
