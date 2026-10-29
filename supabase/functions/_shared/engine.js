@@ -94,12 +94,32 @@ export function makeCtx(candles, tfKey) {
   const closes = candles.map((x) => x.c);
   const cache = {};
   const memo = (k, f) => (cache[k] !== undefined ? cache[k] : (cache[k] = f()));
-  return {
+  const makeNy = () => ctx.ny();
+  const ctx = {
     c: candles, closes, n: candles.length, tf: tfOf(tfKey),
     ema: (p) => memo("ema" + p, () => ema(closes, p)),
     rsi: (p) => memo("rsi" + p, () => rsi(closes, p)),
     atr: () => memo("atr", () => atr(candles, 14)),
     adx: () => memo("adx", () => adx(candles, 14)),
+    // New York wall-clock time for each candle (handles daylight saving): { date, h (fractional hour), wd }
+    ny: () => memo("ny", () => {
+      const f = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23" });
+      return candles.map((x) => {
+        const o = {};
+        for (const part of f.formatToParts(new Date(x.t))) o[part.type] = part.value;
+        return { date: `${o.year}-${o.month}-${o.day}`, h: Number(o.hour) % 24 + Number(o.minute) / 60, wd: o.weekday };
+      });
+    }),
+    nyRange: (from, to) => memo(`nyr${from}-${to}`, () => {
+      const map = {}, ny = makeNy();
+      candles.forEach((x, i) => {
+        const k = ny[i];
+        if (k.h < from || k.h >= to) return;
+        const r = map[k.date] || (map[k.date] = { hi: -Infinity, lo: Infinity, bars: 0 });
+        r.hi = Math.max(r.hi, x.h); r.lo = Math.min(r.lo, x.l); r.bars++;
+      });
+      return map;
+    }),
     asianRange: (endHour) => memo("asia" + endHour, () => {
       const map = {};
       for (const x of candles) {
@@ -112,8 +132,12 @@ export function makeCtx(candles, tfKey) {
       return map;
     }),
   };
+  return ctx;
 }
 
+const nyClock = (h) => { const hh = Math.floor(h), m = Math.round((h - hh) * 60); return `${((hh + 11) % 12) + 1}${m ? ":" + String(m).padStart(2, "0") : ""} ${hh < 12 ? "AM" : "PM"}`; };
+const ctClock = (h) => nyClock((h + 23) % 24);
+const utcToCt = (h) => { const now = new Date(); const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h)); return d.toLocaleTimeString("en-US", { hour: "numeric", timeZone: "America/Chicago" }); };
 const f1 = (v) => (isFinite(v) ? v.toFixed(0) : "–");
 
 // ── Strategies ────────────────────────────────────────────────
@@ -212,6 +236,60 @@ export const STRATEGIES = [
       return a < 20 ? `Ranging (ADX ${f1(a)}) · RSI ${f1(r)}, waiting for ${p.lo}/${p.hi}` : `Off: market is trending (ADX ${f1(a)})`;
     },
   },
+  {
+    key: "nybreak", name: "New York breakout", author: "Session range breakout", style: "London-morning range, traded in New York",
+    timeframes: ["M15", "H1"], warmup: () => 40,
+    // Hours are New York time. Range from..to, entries on candles closing after `to` and by `until`.
+    grid: [{ from: 3, to: 9, until: 13 }, { from: 3, to: 9, until: 12 }, { from: 7, to: 9, until: 13 }],
+    rules: (p, tf) => `Mark the high and low from ${nyClock(p.from)} to ${nyClock(p.to)} New York time (${ctClock(p.from)}–${ctClock(p.to)} Central). Enter when a ${tf.long} candle closes outside that range between ${ctClock(p.to)} and ${ctClock(p.until)} Central. Stop at the range midpoint (at least half an ATR). TP1 at 1R, TP2 at 2R.`,
+    signal(x, i, p) {
+      const k = x.ny()[i], c = x.c;
+      if (k.wd === "Sat" || k.wd === "Sun") return null;
+      const closeH = k.h + x.tf.minutes / 60;
+      if (closeH <= p.to || closeH > p.until) return null;
+      const r = x.nyRange(p.from, p.to)[k.date], at = x.atr()[i];
+      if (!r || r.bars < ((p.to - p.from) * 60 / x.tf.minutes) * 0.8 || !isFinite(at)) return null;
+      const mid = (r.hi + r.lo) / 2;
+      if (r.hi - r.lo > 4 * at) return null;
+      if (c[i].c > r.hi && c[i - 1].c <= r.hi) return { dir: "buy", sl: Math.min(mid, c[i].c - 0.5 * at) };
+      if (c[i].c < r.lo && c[i - 1].c >= r.lo) return { dir: "sell", sl: Math.max(mid, c[i].c + 0.5 * at) };
+      return null;
+    },
+    status(x, i, p) {
+      const h = x.ny()[i].h + x.tf.minutes / 60;
+      if (h <= p.to && h > p.from) return `Building the range until ${ctClock(p.to)} Central`;
+      if (h > p.to && h <= p.until) return `New York window open until ${ctClock(p.until)} Central, waiting for a close outside the range`;
+      return `Next window ${ctClock(p.to)}–${ctClock(p.until)} Central`;
+    },
+  },
+  {
+    key: "overnight", name: "Overnight stop orders", author: "London breakout, set before bed", style: "Pending orders",
+    timeframes: ["H1"], warmup: () => 40, pending: true,
+    // Hours are UTC. Range 00:00..`to`; the two stop orders are sent at `to` and expire at `until`.
+    grid: [{ to: 5, until: 10 }, { to: 5, until: 12 }, { to: 4, until: 10 }],
+    rules: (p) => `At ${utcToCt(p.to)} Central the bot sends two pending orders around the overnight range (00:00–${String(p.to).padStart(2, "0")}:00 UTC): a buy stop just above the high and a sell stop just below the low. Whichever triggers first is the trade; cancel the other. Orders expire at ${utcToCt(p.until)} Central. Stop at the range midpoint (at least the timeframe minimum). TP1 at 1R, TP2 at 2R.`,
+    orders(x, i, p) {
+      const c = x.c, start = new Date(c[i].t), closeH = start.getUTCHours() + x.tf.minutes / 60, wd = start.getUTCDay();
+      if (closeH !== p.to || wd === 0 || wd === 6) return null;
+      const day = start.toISOString().slice(0, 10);
+      let hi = -Infinity, lo = Infinity, bars = 0;
+      for (let k = i; k >= 0 && new Date(c[k].t).toISOString().slice(0, 10) === day; k--) { hi = Math.max(hi, c[k].h); lo = Math.min(lo, c[k].l); bars++; }
+      const at = x.atr()[i];
+      if (bars < (p.to * 60 / x.tf.minutes) * 0.8 || !isFinite(at) || hi - lo > 4 * at) return null;
+      const buf = 0.1 * at, mid = (hi + lo) / 2;
+      return {
+        buy: { entry: hi + buf, sl: mid }, sell: { entry: lo - buf, sl: mid },
+        validBars: Math.round(((p.until - p.to) * 60) / x.tf.minutes),
+      };
+    },
+    signal() { return null; },
+    status(x, i, p) {
+      const h = new Date(x.c[i].t).getUTCHours() + x.tf.minutes / 60;
+      if (h < p.to) return `Building the overnight range; orders go out at ${utcToCt(p.to)} Central`;
+      if (h < p.until) return `Tonight's orders are live until ${utcToCt(p.until)} Central`;
+      return `Next orders at ${utcToCt(p.to)} Central`;
+    },
+  },
 ];
 export const STRATEGY_BY_KEY = Object.fromEntries(STRATEGIES.map((s) => [s.key, s]));
 export const strategiesFor = (tfKey) => STRATEGIES.filter((s) => s.timeframes.includes(tfOf(tfKey).key));
@@ -266,6 +344,61 @@ export function simulate(x, strat, params, from, to, pair, spreadPips) {
   return trades;
 }
 
+// Pending orders: two stop orders around a range; the first to trigger becomes the trade.
+// If both trigger in the same candle, or the stop is touched in the entry candle, it counts as a loss.
+export function simulatePending(x, strat, params, from, to, pair, spreadPips) {
+  const cfg = PAIRS[pair], c = x.c, tf = x.tf, trades = [];
+  const start = Math.max(from, strat.warmup(tf), 2);
+  for (let i = start; i < to; i++) {
+    if (c[i].complete === false) break;
+    const o = strat.orders(x, i, params);
+    if (!o) continue;
+    for (const side of ["buy", "sell"]) o[side] = applyMinStopPending(o[side], side, pair, tf);
+    let fill = null, j = i + 1;
+    for (; j < c.length && j <= i + o.validBars; j++) {
+      const b = c[j], hb = b.h >= o.buy.entry, hs = b.l <= o.sell.entry;
+      if (!hb && !hs) continue;
+      const dir = hb && hs ? (Math.abs(b.o - o.buy.entry) < Math.abs(b.o - o.sell.entry) ? "buy" : "sell") : hb ? "buy" : "sell";
+      const ord = o[dir], entry = dir === "buy" ? Math.max(b.o, ord.entry) : Math.min(b.o, ord.entry);
+      fill = { dir, entry, sl: ord.sl, j, both: hb && hs };
+      break;
+    }
+    if (!fill) { if (j >= c.length) break; i = j - 1; continue; }
+    const L = levels(fill.dir, fill.entry, fill.sl), s = fill.dir === "buy" ? 1 : -1;
+    let r = null, tp1 = false, k = fill.j;
+    const first = c[k];
+    if (fill.both || s * ((s > 0 ? first.l : first.h) - L.sl) <= 0) r = -1;
+    for (k = fill.j + 1; r === null && k < c.length && k <= fill.j + tf.holdBars; k++) {
+      const adverse = s > 0 ? c[k].l : c[k].h, favor = s > 0 ? c[k].h : c[k].l;
+      if (!tp1) {
+        if (s * (adverse - L.sl) <= 0) { r = -1; break; }
+        if (s * (favor - L.tp1) >= 0) { tp1 = true; if (s * (favor - L.tp2) >= 0) { r = 1.5; break; } }
+      } else {
+        if (s * (adverse - L.entry) <= 0) { r = 0.5; break; }
+        if (s * (favor - L.tp2) >= 0) { r = 1.5; break; }
+      }
+    }
+    if (r === null) {
+      if (k >= c.length) break;
+      const move = (s * (c[k - 1].c - L.entry)) / L.risk;
+      r = tp1 ? 0.5 + 0.5 * move : move;
+    }
+    r -= (spreadPips * cfg.pip) / L.risk;
+    const exitIdx = Math.min(k, c.length - 1);
+    trades.push({ i: fill.j, t: c[fill.j].t, dir: fill.dir, ...L, r: Math.round(r * 100) / 100, exitIdx, exitT: c[exitIdx].t });
+    i = exitIdx;
+  }
+  return trades;
+}
+
+function applyMinStopPending(ord, dir, pair, tf) {
+  const cfg = PAIRS[pair], minDist = Math.max(tf.minStopPips, cfg.typicalSpread / MAX_SPREAD_SHARE) * cfg.pip;
+  if (Math.abs(ord.entry - ord.sl) >= minDist) return ord;
+  return { ...ord, sl: dir === "buy" ? ord.entry - minDist : ord.entry + minDist };
+}
+
+const runSim = (x, st, p, from, to, pair, sp) => (st.pending ? simulatePending : simulate)(x, st, p, from, to, pair, sp);
+
 export function stats(trades) {
   const n = trades.length;
   let wins = 0, pos = 0, neg = 0, streak = 0, worst = 0, run = 0;
@@ -298,16 +431,16 @@ export function evaluate(candles, pair, tfKey = DEFAULT_TF, spreadPips) {
   const results = strategiesFor(tfKey).map((st) => {
     let best = null;
     for (const p of st.grid) {
-      const s = stats(simulate(x, st, p, 0, split, pair, sp));
+      const s = stats(runSim(x, st, p, 0, split, pair, sp));
       if (!best || score(s) > score(best.s)) best = { p, s };
     }
-    const unseenTrades = simulate(x, st, best.p, split, n, pair, sp);
+    const unseenTrades = runSim(x, st, best.p, split, n, pair, sp);
     const unseen = stats(unseenTrades);
     const v = verdictFor(best.s, unseen);
-    const all = simulate(x, st, best.p, 0, n, pair, sp);
+    const all = runSim(x, st, best.p, 0, n, pair, sp);
     return {
       key: st.key, name: st.name, author: st.author, style: st.style, params: best.p, rules: st.rules(best.p, x.tf),
-      tune: best.s, unseen, unseenTrades, allTrades: all, verdict: v.key, verdictText: v.text, trusted: v.trusted,
+      tune: best.s, unseen, unseenTrades, allTrades: all, verdict: v.key, verdictText: v.text, trusted: v.trusted, pending: !!st.pending,
     };
   });
   results.sort((a, b) => (b.trusted - a.trusted) || (b.unseen.avgR * Math.sqrt(Math.max(1, b.unseen.n)) - a.unseen.avgR * Math.sqrt(Math.max(1, a.unseen.n))));
@@ -325,13 +458,24 @@ export function liveSignals(evalResult, pair) {
   if (i < 2) return [];
   const fired = [];
   for (const r of results) {
-    let sig = STRATEGY_BY_KEY[r.key].signal(x, i, r.params);
+    const st = STRATEGY_BY_KEY[r.key];
+    if (st.pending) {
+      const o = st.orders(x, i, r.params);
+      if (!o) continue;
+      const validUntil = x.c[i].t + (o.validBars + 1) * x.tf.minutes * 60e3;
+      for (const dir of ["buy", "sell"]) {
+        const ord = applyMinStopPending(o[dir], dir, pair, x.tf);
+        fired.push({ strategy: r.key, name: r.name, trusted: r.trusted, dir, candleTime: x.c[i].t, orderType: "stop", validUntil, ...levels(dir, ord.entry, ord.sl) });
+      }
+      continue;
+    }
+    let sig = st.signal(x, i, r.params);
     if (!sig) continue;
     sig = applyMinStop(sig, x.c[i].c, pair, x.tf);
     const L = levels(sig.dir, x.c[i].c, sig.sl);
-    fired.push({ strategy: r.key, name: r.name, trusted: r.trusted, dir: sig.dir, candleTime: x.c[i].t, ...L });
+    fired.push({ strategy: r.key, name: r.name, trusted: r.trusted, dir: sig.dir, candleTime: x.c[i].t, orderType: "market", ...L });
   }
-  for (const f of fired) f.confluence = fired.filter((g) => g.dir === f.dir).map((g) => g.strategy);
+  for (const f of fired) f.confluence = fired.filter((g) => g.dir === f.dir && g.orderType === f.orderType).map((g) => g.strategy);
   return fired;
 }
 
