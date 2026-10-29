@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/forex-signal-tool/static/css/main.483519f0.css",
-    "main.js": "/forex-signal-tool/static/js/main.7120b9ef.js",
+    "main.css": "/forex-signal-tool/static/css/main.5fe3ddef.css",
+    "main.js": "/forex-signal-tool/static/js/main.96571585.js",
     "index.html": "/forex-signal-tool/index.html",
-    "main.483519f0.css.map": "/forex-signal-tool/static/css/main.483519f0.css.map",
-    "main.7120b9ef.js.map": "/forex-signal-tool/static/js/main.7120b9ef.js.map"
+    "main.5fe3ddef.css.map": "/forex-signal-tool/static/css/main.5fe3ddef.css.map",
+    "main.96571585.js.map": "/forex-signal-tool/static/js/main.96571585.js.map"
   },
   "entrypoints": [
-    "static/css/main.483519f0.css",
-    "static/js/main.7120b9ef.js"
+    "static/css/main.5fe3ddef.css",
+    "static/js/main.96571585.js"
   ]
 }
