@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase, oanda } from "../lib/supabase";
+import { supabase, oanda, telegram } from "../lib/supabase";
 import { useData } from "../lib/data";
 import { accountState, PAIRS } from "../engine/engine";
 import { Head, Card, Meter, Toggle, NumField, Svg, ErrorNote, Note, money, pairLabel, when } from "../components/ui";
@@ -73,6 +73,7 @@ export default function Account() {
       {dirty && <button className="btn block" onClick={saveRules}>Save rules</button>}
       {saved && <Note>Saved.</Note>}
 
+      <TestAlert />
       <Security />
       <ScannerStatus />
       <Card className="list">
@@ -153,6 +154,32 @@ function Security() {
       </Card>
       <ErrorNote>{err}</ErrorNote>
       {msg && <Note>{msg}</Note>}
+    </>
+  );
+}
+
+function TestAlert() {
+  const d = useData();
+  const [state, setState] = useState(null);
+  const linked = !!d.alerts?.telegram_chat_id;
+  async function ping() {
+    setState({ busy: true });
+    try { await telegram.test(); setState({ ok: "Test sent. Check Telegram." }); }
+    catch (e) { setState({ err: e.message }); }
+  }
+  return (
+    <>
+      <h2>Telegram</h2>
+      <Card className="list">
+        <div className="row">
+          <span className="grow"><span>{linked ? `Connected${d.alerts.telegram_username ? ` as @${d.alerts.telegram_username}` : ""}` : "Not connected"}</span>
+            <span className="hint">{linked ? "Sends a sample signal so you can see what alerts look like" : "Connect it under Alerts"}</span></span>
+          {linked ? <button className="btn small-btn" onClick={ping} disabled={state?.busy}>{state?.busy ? "Sending…" : "Send test alert"}</button>
+            : <a className="btn small-btn" href="#/alerts">Connect</a>}
+        </div>
+      </Card>
+      <ErrorNote>{state?.err}</ErrorNote>
+      {state?.ok && <Note>{state.ok}</Note>}
     </>
   );
 }

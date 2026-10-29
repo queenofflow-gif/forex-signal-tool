@@ -67,7 +67,9 @@ Deno.serve(async (req) => {
   if (body.action === "test") {
     const { data: a } = await db.from("alert_settings").select("telegram_chat_id").eq("user_id", uid).single();
     if (!a?.telegram_chat_id) return json({ error: "Telegram isn't connected yet" }, 400);
-    await send(a.telegram_chat_id, "🔔 Test alert from Forex Signal. Alerts are working.");
+    const t = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" });
+    await send(a.telegram_chat_id,
+      `🔔 <b>TEST · Buy EUR/USD · EMA crossover · 4h</b>\n<code>In 1.08420 · SL 1.08070\nTP1 1.08770 · TP2 1.09120\n0.14 lots · risk $49</code>\nValid for about 12 hours.\n\nThis is a sample. Real signals look like this. Alerts are working (sent ${t} CT).`);
     return json({ ok: true });
   }
   if (body.action === "unlink") {
