@@ -189,3 +189,6 @@ select { min-height: 40px; border-radius: 8px; border: 1px solid var(--line2); b
 .login-brand h1 { font-size: 28px; }
 .login-brand p { color: var(--text2); }
 .qr { background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+
+.radio-row { cursor: pointer; align-items: flex-start; }
+.radio-row input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--ink); flex-shrink: 0; }

@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import { useData } from "../lib/data";
 import { go } from "../lib/router";
 import { useMarket, usePrices, ratesFrom } from "../lib/market";
-import { accountState, preTradeChecks, sizeTrade, STRATEGY_BY_KEY, pipValueUSD } from "../engine/engine";
+import { accountState, preTradeChecks, sizeTrade, STRATEGY_BY_KEY, pipValueUSD, tfOf } from "../engine/engine";
 import PriceChart from "../components/PriceChart";
 import { Head, Card, Stat, Svg, Note, ErrorNote, Loading, pairLabel, dirLabel, price, money, when } from "../components/ui";
 import { nameOf } from "./Signals";
@@ -11,7 +11,8 @@ import { nameOf } from "./Signals";
 export default function SignalDetail({ id }) {
   const d = useData();
   const s = d.signals.find((x) => String(x.id) === String(id));
-  const m = useMarket(s?.pair);
+  const tf = tfOf(s?.granularity);
+  const m = useMarket(s?.pair, tf.key);
   const { prices } = usePrices(s ? [s.pair] : []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -24,15 +25,15 @@ export default function SignalDetail({ id }) {
 
   const pair = s.pair, res = m.ev?.results.find((r) => r.key === s.strategy);
   const st = STRATEGY_BY_KEY[s.strategy];
-  const rules = res ? res.rules : st?.rules(st.grid[0]);
+  const rules = res ? res.rules : st?.rules(st.grid[0], tf);
   const size = sizeTrade(d.profile, pair, Number(s.entry), Number(s.sl), rates);
   const lots = size.lots || Number(s.lots), risk = size.lots ? size.actualRisk : Number(s.risk_usd);
   const pv = pipValueUSD(pair, Number(s.entry), rates) || 0;
   const reward2 = Math.floor((lots / 2) * 100) / 100 * Number(s.stop_pips) * pv + (lots - Math.floor((lots / 2) * 100) / 100) * Number(s.stop_pips) * 2 * pv;
   const open = d.trades.filter((t) => t.status === "open");
-  const checks = preTradeChecks(d.profile, { pair, dir: s.direction }, { spreadPips: live?.spreadPips ?? s.spread_pips, openTrades: open, account, riskUsd: risk });
+  const checks = preTradeChecks(d.profile, { pair, dir: s.direction }, { spreadPips: live?.spreadPips ?? (s.spread_pips == null ? null : Number(s.spread_pips)), stopPips: Number(s.stop_pips), openTrades: open, account, riskUsd: risk });
   const blocked = checks.filter((c) => c.blocking && !c.ok);
-  const fresh = s.status === "active" && Date.now() - new Date(s.created_at) < 2 * 3600e3;
+  const fresh = s.status === "active" && Date.now() - new Date(s.created_at) < tf.expiryHours * 3600e3;
   const levelsText = `${dirLabel(s.direction)} ${pairLabel(pair)} ${lots.toFixed(2)} lots\nEntry ${price(pair, s.entry)}\nSL ${price(pair, s.sl)}\nTP1 ${price(pair, s.tp1)}\nTP2 ${price(pair, s.tp2)}`;
 
   async function take() {
@@ -63,10 +64,10 @@ export default function SignalDetail({ id }) {
 
   return (
     <div className="page narrow">
-      <Head back="#/" sub={`Signal ${when(s.created_at)} · 15m`} title={`${dirLabel(s.direction)} ${pairLabel(pair)}`} />
+      <Head back="#/" sub={`Signal ${when(s.created_at)} · ${tf.label} · valid about ${tf.expiryHours}h`} title={`${dirLabel(s.direction)} ${pairLabel(pair)}`} />
       {s.status === "skipped" && <Note tone="warn">Skipped automatically: {s.skip_reason}</Note>}
       {s.status === "taken" && <Note>You took this signal. See it under Trades.</Note>}
-      {s.status === "expired" && <Note tone="warn">This signal is more than 2 hours old and has expired.</Note>}
+      {s.status === "expired" && <Note tone="warn">This signal is more than {tf.expiryHours} hours old and has expired.</Note>}
 
       <Card className="pad accent stack">
         <span className="eyebrow">{s.confluence.length > 1 ? `CONFLUENCE: ${s.confluence.length} STRATEGIES AGREE` : "ONE STRATEGY"}{s.trusted ? "" : " · NOT YET TRUSTED"}</span>

@@ -2,15 +2,24 @@
 // Pure JavaScript, no imports. Keep it that way: supabase/functions copy this file.
 
 export const PAIRS = {
-  EUR_USD: { label: "EUR/USD", pip: 0.0001, base: "EUR", quote: "USD", digits: 5, typicalSpread: 1.0 },
-  GBP_AUD: { label: "GBP/AUD", pip: 0.0001, base: "GBP", quote: "AUD", digits: 5, typicalSpread: 2.6 },
-  USD_JPY: { label: "USD/JPY", pip: 0.01, base: "USD", quote: "JPY", digits: 3, typicalSpread: 1.2 },
+  // typicalSpread: conservative OANDA spreads, charged on every backtest trade.
+  EUR_USD: { label: "EUR/USD", pip: 0.0001, base: "EUR", quote: "USD", digits: 5, typicalSpread: 1.4 },
+  GBP_AUD: { label: "GBP/AUD", pip: 0.0001, base: "GBP", quote: "AUD", digits: 5, typicalSpread: 4.5 },
+  USD_JPY: { label: "USD/JPY", pip: 0.01, base: "USD", quote: "JPY", digits: 3, typicalSpread: 1.6 },
 };
 export const CONVERSION_PAIRS = ["AUD_USD"];
-export const GRANULARITY = "M15";
 export const CANDLE_COUNT = 5000;
-const MAX_HOLD_BARS = 96; // 24 hours on M15
 const TUNE_SHARE = 0.6;
+const MAX_SPREAD_SHARE = 0.15; // spread may be at most 15% of the stop distance
+
+// Timeframes. OANDA's 4-hour candles close at 21, 1, 5, 9, 13, 17 New York time (8 PM, 12 AM, 4 AM, 8 AM, 12 PM, 4 PM Central).
+export const TIMEFRAMES = {
+  M15: { key: "M15", label: "15m", long: "15-minute", minutes: 15, holdBars: 96, trendEma: 800, trendLabel: "4-hour 50 EMA", minStopPips: 8, expiryHours: 2, asiaBars: 12, sessionFilter: true },
+  H1: { key: "H1", label: "1h", long: "1-hour", minutes: 60, holdBars: 120, trendEma: 200, trendLabel: "4-hour 50 EMA", minStopPips: 12, expiryHours: 6, asiaBars: 5, sessionFilter: false },
+  H4: { key: "H4", label: "4h", long: "4-hour", minutes: 240, holdBars: 60, trendEma: 300, trendLabel: "daily 50 EMA", minStopPips: 20, expiryHours: 12, asiaBars: 0, sessionFilter: false },
+};
+export const DEFAULT_TF = "H4";
+export const tfOf = (key) => TIMEFRAMES[key] || TIMEFRAMES[DEFAULT_TF];
 
 // ── Indicators (all arrays aligned to candle index) ───────────
 export function ema(values, p) {
@@ -60,12 +69,12 @@ export function adx(c, p = 14) {
 }
 
 // ── Context: candles plus cached indicators ───────────────────
-export function makeCtx(candles) {
+export function makeCtx(candles, tfKey) {
   const closes = candles.map((x) => x.c);
   const cache = {};
   const memo = (k, f) => (cache[k] !== undefined ? cache[k] : (cache[k] = f()));
   return {
-    c: candles, closes, n: candles.length,
+    c: candles, closes, n: candles.length, tf: tfOf(tfKey),
     ema: (p) => memo("ema" + p, () => ema(closes, p)),
     rsi: (p) => memo("rsi" + p, () => rsi(closes, p)),
     atr: () => memo("atr", () => atr(candles, 14)),
@@ -87,9 +96,11 @@ export function makeCtx(candles) {
 const f1 = (v) => (isFinite(v) ? v.toFixed(0) : "–");
 
 // ── Strategies ────────────────────────────────────────────────
+// timeframes: where a strategy makes sense. warmup(tf): candles needed before the first signal.
 export const STRATEGIES = [
   {
-    key: "grail", name: "Holy Grail", author: "Linda Raschke", style: "Trend pullback", warmup: 40,
+    key: "grail", name: "Holy Grail", author: "Linda Raschke", style: "Trend pullback",
+    timeframes: ["M15", "H1", "H4"], warmup: () => 40,
     grid: [{ adxMin: 25 }, { adxMin: 30 }, { adxMin: 35 }],
     rules: (p) => `ADX(14) above ${p.adxMin} with the trend on the matching side. Price pulls back to the 20 EMA, then the next candle closes beyond the pullback candle's high (buy) or low (sell). Stop 1.5 × ATR. TP1 at 1R, TP2 at 2R.`,
     signal(x, i, p) {
@@ -107,30 +118,32 @@ export const STRATEGIES = [
     },
   },
   {
-    key: "ema", name: "EMA crossover", author: "Classic trend following", style: "4H trend filter", warmup: 820,
+    key: "ema", name: "EMA crossover", author: "Classic trend following", style: "Higher-timeframe trend filter",
+    timeframes: ["M15", "H1", "H4"], warmup: (tf) => tf.trendEma + 20,
     grid: [{ f: 9, s: 21 }, { f: 12, s: 26 }, { f: 20, s: 50 }],
-    rules: (p) => `${p.f} EMA crosses the ${p.s} EMA in the same direction as the 4-hour 50 EMA trend (800 EMA on 15-minute candles). Stop 1.5 × ATR. TP1 at 1R, TP2 at 2R.`,
+    rules: (p, tf) => `${p.f} EMA crosses the ${p.s} EMA in the same direction as the ${tf.trendLabel} trend (${tf.trendEma} EMA on ${tf.long} candles). Stop 1.5 × ATR. TP1 at 1R, TP2 at 2R.`,
     signal(x, i, p) {
-      const ef = x.ema(p.f), es = x.ema(p.s), et = x.ema(800), at = x.atr(), c = x.c;
+      const ef = x.ema(p.f), es = x.ema(p.s), et = x.ema(x.tf.trendEma), at = x.atr(), c = x.c;
       if (!isFinite(at[i])) return null;
       if (ef[i - 1] <= es[i - 1] && ef[i] > es[i] && c[i].c > et[i]) return { dir: "buy", sl: c[i].c - 1.5 * at[i] };
       if (ef[i - 1] >= es[i - 1] && ef[i] < es[i] && c[i].c < et[i]) return { dir: "sell", sl: c[i].c + 1.5 * at[i] };
       return null;
     },
     status(x, i, p) {
-      const ef = x.ema(p.f)[i], es = x.ema(p.s)[i], et = x.ema(800)[i], up = x.c[i].c > et;
-      return `4H trend ${up ? "up" : "down"} · ${p.f} EMA ${ef > es ? "above" : "below"} ${p.s} EMA, waiting for a cross ${up ? "up" : "down"}`;
+      const ef = x.ema(p.f)[i], es = x.ema(p.s)[i], et = x.ema(x.tf.trendEma)[i], up = x.c[i].c > et;
+      return `Trend ${up ? "up" : "down"} · ${p.f} EMA ${ef > es ? "above" : "below"} ${p.s} EMA, waiting for a cross ${up ? "up" : "down"}`;
     },
   },
   {
-    key: "london", name: "London breakout", author: "Session range breakout", style: "Asian range", warmup: 40,
+    key: "london", name: "London breakout", author: "Session range breakout", style: "Asian range",
+    timeframes: ["M15", "H1"], warmup: () => 40,
     grid: [{ end: 7, until: 10 }, { end: 7, until: 12 }, { end: 6, until: 10 }],
-    rules: (p) => `Mark the Asian session high and low (00:00–${String(p.end).padStart(2, "0")}:00 UTC, about 7 PM–${p.end === 7 ? "2" : "1"} AM Central). Enter when a 15-minute candle closes outside that range before ${p.until}:00 UTC. Stop at the range midpoint. TP1 at 1R, TP2 at 2R.`,
+    rules: (p, tf) => `Mark the Asian session high and low (00:00–${String(p.end).padStart(2, "0")}:00 UTC, about 7 PM–${p.end === 7 ? "2" : "1"} AM Central). Enter when a ${tf.long} candle closes outside that range before ${p.until}:00 UTC. Stop at the range midpoint. TP1 at 1R, TP2 at 2R.`,
     signal(x, i, p) {
-      const c = x.c, d = new Date(c[i].t), h = d.getUTCHours(), wd = d.getUTCDay();
+      const c = x.c, d = new Date(c[i].t), endT = new Date(c[i].t + x.tf.minutes * 60e3), h = endT.getUTCHours(), wd = d.getUTCDay();
       if (wd === 0 || wd === 6 || h < p.end || h >= p.until) return null;
       const r = x.asianRange(p.end)[d.toISOString().slice(0, 10)], at = x.atr()[i];
-      if (!r || r.bars < 12 || !isFinite(at)) return null;
+      if (!r || r.bars < x.tf.asiaBars || !isFinite(at)) return null;
       const mid = (r.hi + r.lo) / 2, width = r.hi - r.lo;
       if (width > 4 * at) return null;
       if (c[i].c > r.hi && c[i - 1].c <= r.hi) return { dir: "buy", sl: Math.min(mid, c[i].c - 0.5 * at) };
@@ -138,14 +151,15 @@ export const STRATEGIES = [
       return null;
     },
     status(x, i, p) {
-      const d = new Date(x.c[i].t), h = d.getUTCHours();
+      const h = new Date(x.c[i].t + x.tf.minutes * 60e3).getUTCHours();
       if (h < p.end) return "Building the Asian range";
       if (h < p.until) return "London window open, waiting for a close outside the Asian range";
       return `Window closed for today (opens ${p.end}:00 UTC)`;
     },
   },
   {
-    key: "soup", name: "Turtle Soup", author: "Linda Raschke", style: "False breakout fade", warmup: 40,
+    key: "soup", name: "Turtle Soup", author: "Linda Raschke", style: "False breakout fade",
+    timeframes: ["M15", "H1", "H4"], warmup: () => 40,
     grid: [{ lb: 20 }, { lb: 30 }],
     rules: (p) => `Price breaks the ${p.lb}-candle high or low, then closes back inside within 2 candles. Trade against the break. Stop just beyond the false break. TP1 at 1R, TP2 at 2R.`,
     signal(x, i, p) {
@@ -161,7 +175,8 @@ export const STRATEGIES = [
     status(x, i, p) { return `Watching the ${p.lb}-candle high and low for a false break`; },
   },
   {
-    key: "rsi", name: "RSI reversal", author: "Mean reversion", style: "Ranging markets only", warmup: 40,
+    key: "rsi", name: "RSI reversal", author: "Mean reversion", style: "Ranging markets only",
+    timeframes: ["M15", "H1", "H4"], warmup: () => 40,
     grid: [{ p: 14, lo: 30, hi: 70 }, { p: 14, lo: 25, hi: 75 }, { p: 7, lo: 20, hi: 80 }],
     rules: (p) => `RSI(${p.p}) goes below ${p.lo} or above ${p.hi}, then crosses back. Enter on the cross. Only valid when ADX is under 20 (a ranging market). Stop 1.5 × ATR. TP1 at 1R, TP2 at 2R.`,
     signal(x, i, p) {
@@ -178,6 +193,7 @@ export const STRATEGIES = [
   },
 ];
 export const STRATEGY_BY_KEY = Object.fromEntries(STRATEGIES.map((s) => [s.key, s]));
+export const strategiesFor = (tfKey) => STRATEGIES.filter((s) => s.timeframes.includes(tfOf(tfKey).key));
 
 // ── Trade levels and simulation ───────────────────────────────
 export function levels(dir, entry, sl) {
@@ -185,20 +201,28 @@ export function levels(dir, entry, sl) {
   return { entry, sl, tp1: entry + s * risk, tp2: entry + s * 2 * risk, risk };
 }
 
+// Widen a stop that's too tight for the timeframe (noise) or for the spread.
+export function applyMinStop(sig, entry, pair, tf) {
+  const cfg = PAIRS[pair];
+  const minDist = Math.max(tf.minStopPips, cfg.typicalSpread / MAX_SPREAD_SHARE) * cfg.pip;
+  if (Math.abs(entry - sig.sl) >= minDist) return sig;
+  return { ...sig, sl: sig.dir === "buy" ? entry - minDist : entry + minDist };
+}
+
 // Management: hit TP1 → close half, stop to breakeven; TP2 closes the rest.
 // Same-candle stop and target counts as a stop (conservative). Spread is charged per trade.
 export function simulate(x, strat, params, from, to, pair, spreadPips) {
-  const cfg = PAIRS[pair], c = x.c, trades = [];
-  const start = Math.max(from, strat.warmup || 40, 2);
+  const cfg = PAIRS[pair], c = x.c, tf = x.tf, trades = [];
+  const start = Math.max(from, strat.warmup(tf), 2);
   for (let i = start; i < to; i++) {
     if (c[i].complete === false) break;
-    const sig = strat.signal(x, i, params);
+    let sig = strat.signal(x, i, params);
     if (!sig) continue;
+    sig = applyMinStop(sig, c[i].c, pair, tf);
     const L = levels(sig.dir, c[i].c, sig.sl);
-    if (L.risk / cfg.pip < 3) continue;
     const s = sig.dir === "buy" ? 1 : -1;
     let tp1 = false, r = null, j = i + 1;
-    for (; j < c.length && j <= i + MAX_HOLD_BARS; j++) {
+    for (; j < c.length && j <= i + tf.holdBars; j++) {
       const hi = c[j].h, lo = c[j].l;
       const adverse = s > 0 ? lo : hi, favor = s > 0 ? hi : lo;
       if (!tp1) {
@@ -247,10 +271,10 @@ export function verdictFor(tune, unseen) {
 }
 
 // Walk-forward: pick settings on the first 60%, judge them on the last 40%.
-export function evaluate(candles, pair, spreadPips) {
-  const x = makeCtx(candles), n = candles.length, split = Math.floor(n * TUNE_SHARE);
+export function evaluate(candles, pair, tfKey = DEFAULT_TF, spreadPips) {
+  const x = makeCtx(candles, tfKey), n = candles.length, split = Math.floor(n * TUNE_SHARE);
   const sp = spreadPips ?? PAIRS[pair].typicalSpread;
-  const results = STRATEGIES.map((st) => {
+  const results = strategiesFor(tfKey).map((st) => {
     let best = null;
     for (const p of st.grid) {
       const s = stats(simulate(x, st, p, 0, split, pair, sp));
@@ -261,12 +285,12 @@ export function evaluate(candles, pair, spreadPips) {
     const v = verdictFor(best.s, unseen);
     const all = simulate(x, st, best.p, 0, n, pair, sp);
     return {
-      key: st.key, name: st.name, author: st.author, style: st.style, params: best.p, rules: st.rules(best.p),
+      key: st.key, name: st.name, author: st.author, style: st.style, params: best.p, rules: st.rules(best.p, x.tf),
       tune: best.s, unseen, unseenTrades, allTrades: all, verdict: v.key, verdictText: v.text, trusted: v.trusted,
     };
   });
   results.sort((a, b) => (b.trusted - a.trusted) || (b.unseen.avgR * Math.sqrt(Math.max(1, b.unseen.n)) - a.unseen.avgR * Math.sqrt(Math.max(1, a.unseen.n))));
-  return { ctx: x, split, splitTime: candles[split]?.t, results };
+  return { ctx: x, tf: x.tf, split, splitTime: candles[split]?.t, startTime: candles[0]?.t, results };
 }
 
 export function lastCompleteIndex(candles) {
@@ -280,10 +304,10 @@ export function liveSignals(evalResult, pair) {
   if (i < 2) return [];
   const fired = [];
   for (const r of results) {
-    const st = STRATEGY_BY_KEY[r.key], sig = st.signal(x, i, r.params);
+    let sig = STRATEGY_BY_KEY[r.key].signal(x, i, r.params);
     if (!sig) continue;
+    sig = applyMinStop(sig, x.c[i].c, pair, x.tf);
     const L = levels(sig.dir, x.c[i].c, sig.sl);
-    if (L.risk / PAIRS[pair].pip < 3) continue;
     fired.push({ strategy: r.key, name: r.name, trusted: r.trusted, dir: sig.dir, candleTime: x.c[i].t, ...L });
   }
   for (const f of fired) f.confluence = fired.filter((g) => g.dir === f.dir).map((g) => g.strategy);
@@ -298,11 +322,11 @@ export function strategyStatus(evalResult) {
 }
 
 export function regime(x) {
-  const i = lastCompleteIndex(x.c), { adx: a, pdi, mdi } = x.adx(), e800 = x.ema(800);
+  const i = lastCompleteIndex(x.c), { adx: a, pdi, mdi } = x.adx(), et = x.ema(x.tf.trendEma);
   const v = a[i];
   return {
     adx: v, label: v >= 25 ? "Trending" : v < 20 ? "Ranging" : "Mixed",
-    bias: pdi[i] > mdi[i] ? "up" : "down", htf: x.c[i].c > e800[i] ? "up" : "down",
+    bias: pdi[i] > mdi[i] ? "up" : "down", htf: x.c[i].c > et[i] ? "up" : "down", htfLabel: x.tf.trendLabel,
   };
 }
 
@@ -373,10 +397,16 @@ export function inSession(ts) {
 }
 
 // Pre-trade checks. Returns [{key,label,ok,detail,blocking}]
-export function preTradeChecks(profile, sig, { spreadPips, openTrades = [], account, now = Date.now(), riskUsd }) {
-  const out = [];
+export function preTradeChecks(profile, sig, { spreadPips, stopPips, openTrades = [], account, now = Date.now(), riskUsd }) {
+  const out = [], tf = tfOf(profile.timeframe);
   const maxSpread = Number((profile.max_spread || {})[sig.pair] ?? PAIRS[sig.pair].typicalSpread * 1.5);
-  if (spreadPips != null) out.push({ key: "spread", label: `Spread ${spreadPips.toFixed(1)} pips (max ${maxSpread})`, ok: spreadPips <= maxSpread, detail: spreadPips <= maxSpread ? "OK" : "Too wide", blocking: true });
+  if (spreadPips != null) {
+    out.push({ key: "spread", label: `Spread ${spreadPips.toFixed(1)} pips (max ${maxSpread})`, ok: spreadPips <= maxSpread, detail: spreadPips <= maxSpread ? "OK" : "Too wide", blocking: true });
+    if (stopPips) {
+      const share = spreadPips / stopPips;
+      out.push({ key: "spreadStop", label: `Spread is ${Math.round(share * 100)}% of the stop (max ${MAX_SPREAD_SHARE * 100}%)`, ok: share <= MAX_SPREAD_SHARE, detail: share <= MAX_SPREAD_SHARE ? "OK" : "Too costly", blocking: true });
+    }
+  }
   const halfDaily = account.dailyLimit / 2;
   out.push({ key: "daily", label: "Daily loss used", ok: account.dailyUsed < halfDaily, detail: `$${Math.round(account.dailyUsed)} / $${Math.round(account.dailyLimit)}`, blocking: true });
   out.push({ key: "floor", label: "Room to drawdown floor", ok: account.roomToFloor > riskUsd, detail: `$${Math.round(account.roomToFloor)}`, blocking: true });
@@ -388,7 +418,7 @@ export function preTradeChecks(profile, sig, { spreadPips, openTrades = [], acco
     const clash = open.find((t) => { const e = exposure(t.pair, t.direction); return Object.keys(mine).some((k) => e[k] && e[k] === mine[k]); });
     out.push({ key: "corr", label: "No correlated trade open", ok: !clash, detail: clash ? `${PAIRS[clash.pair].label} open` : "OK", blocking: true });
   }
-  if (profile.sessions_only) out.push({ key: "session", label: "London or New York session", ok: inSession(now), detail: inSession(now) ? "Open" : "Closed", blocking: true });
+  if (profile.sessions_only && tf.sessionFilter) out.push({ key: "session", label: "London or New York session", ok: inSession(now), detail: inSession(now) ? "Open" : "Closed", blocking: true });
   if (account.consistencyCapUsd != null) out.push({ key: "consistency", label: "Consistency: cap today's profit", ok: true, detail: `$${Math.round(account.consistencyCapUsd)}`, blocking: false });
   return out;
 }

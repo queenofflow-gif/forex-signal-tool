@@ -9,6 +9,11 @@ const PRESETS = {
   big: { label: "$50K 2-step", v: { account_size: 50000, max_loss_pct: 10, max_loss_type: "static", daily_loss_pct: 5, consistency_pct: 30, risk_pct: 0.5 } },
   custom: { label: "Custom", v: null },
 };
+const TIMEFRAMES = [
+  ["H4", "4-hour candles (recommended)", "1–3 signals a week per pair. Candles close about 8 AM, 12 PM, 4 PM and 8 PM Central, so you can act before work, at lunch and after. Stops of 20–60 pips."],
+  ["H1", "1-hour candles", "More signals, checked hourly. Stops of 12–30 pips. Adds the London breakout strategy."],
+  ["M15", "15-minute candles", "For watching the screen during London and New York. Tight stops; spread costs matter most."],
+];
 const FIELDS = [
   ["account_size", "Account size", "Starting balance", "$", "", 1000],
   ["max_loss_pct", "Max loss", "Total drawdown allowed", "", "%", 0.5],
@@ -23,6 +28,7 @@ export default function Setup() {
     preset: p.preset, account_size: p.account_size, max_loss_pct: p.max_loss_pct, max_loss_type: p.max_loss_type,
     daily_loss_pct: p.daily_loss_pct, consistency_pct: p.consistency_pct, risk_pct: p.risk_pct,
   });
+  const [timeframe, setTimeframe] = useState(p.timeframe || "H4");
   const [token, setToken] = useState("");
   const [env, setEnv] = useState("practice");
   const [tokBusy, setTokBusy] = useState(false);
@@ -52,7 +58,7 @@ export default function Setup() {
     const row = {
       preset: f.preset, account_size: acct, max_loss_pct: num(f.max_loss_pct), max_loss_type: f.max_loss_type,
       daily_loss_pct: num(f.daily_loss_pct), consistency_pct: num(f.consistency_pct), risk_pct: num(f.risk_pct),
-      setup_done: true, updated_at: new Date().toISOString(),
+      timeframe, setup_done: true, updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("profiles").update(row).eq("user_id", d.uid);
     setBusy(false);
@@ -80,6 +86,16 @@ export default function Setup() {
             {["trailing", "static"].map((t) => <button key={t} type="button" className={f.max_loss_type === t ? "on" : ""} onClick={() => set("max_loss_type")(t)}>{t === "trailing" ? "Trailing" : "Static"}</button>)}
           </div>
         </div>
+      </Card>
+
+      <h2>How often you trade</h2>
+      <Card className="list">
+        {TIMEFRAMES.map(([k, label, hint]) => (
+          <label key={k} className="row radio-row">
+            <input type="radio" name="timeframe" value={k} checked={timeframe === k} onChange={() => setTimeframe(k)} />
+            <span className="grow"><span className="strong">{label}</span><span className="hint">{hint}</span></span>
+          </label>
+        ))}
       </Card>
 
       <h2>Connect live prices</h2>

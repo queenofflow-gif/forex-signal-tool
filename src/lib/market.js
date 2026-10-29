@@ -1,7 +1,7 @@
 // Shared live-market store: candles + strategy evaluation per pair, and polled prices.
 import { useEffect, useReducer } from "react";
 import { oanda } from "./supabase";
-import { evaluate, lastCompleteIndex, CANDLE_COUNT, CONVERSION_PAIRS } from "../engine/engine";
+import { evaluate, lastCompleteIndex, CANDLE_COUNT, CONVERSION_PAIRS, DEFAULT_TF } from "../engine/engine";
 
 const store = { pairs: {}, prices: {}, priceError: null };
 const listeners = new Set();
@@ -12,51 +12,53 @@ function useStore() {
   useEffect(() => { listeners.add(force); return () => listeners.delete(force); }, []);
 }
 
-function reevaluate(s, pair) {
+// Market data is kept per pair and timeframe ("EUR_USD|H4").
+function reevaluate(s, pair, tf) {
   const li = lastCompleteIndex(s.candles);
   const key = li >= 0 ? s.candles[li].t : 0;
   if (s.evalKey === key && s.ev) return;
-  s.ev = evaluate(s.candles.slice(0, li + 1), pair);
+  s.ev = evaluate(s.candles.slice(0, li + 1), pair, tf);
   s.evalKey = key;
 }
 
-async function load(pair) {
-  const s = (store.pairs[pair] = store.pairs[pair] || { status: "loading" });
+async function load(pair, tf) {
+  const id = `${pair}|${tf}`;
+  const s = (store.pairs[id] = store.pairs[id] || { status: "loading" });
   if (s.loading) return;
   s.loading = true;
   try {
-    s.candles = await oanda.candles(pair, CANDLE_COUNT);
-    reevaluate(s, pair);
+    s.candles = await oanda.candles(pair, CANDLE_COUNT, tf);
+    reevaluate(s, pair, tf);
     s.status = "ready"; s.error = null; s.updatedAt = Date.now();
   } catch (e) {
     s.status = s.candles ? "ready" : "error"; s.error = e.message;
   } finally { s.loading = false; emit(); }
 }
 
-async function refresh(pair) {
-  const s = store.pairs[pair];
-  if (!s || !s.candles || s.loading) return load(pair);
+async function refresh(pair, tf) {
+  const s = store.pairs[`${pair}|${tf}`];
+  if (!s || !s.candles || s.loading) return load(pair, tf);
   try {
-    const tail = await oanda.candles(pair, 10);
+    const tail = await oanda.candles(pair, 10, tf);
     const byT = new Map(s.candles.map((c, i) => [c.t, i]));
     for (const c of tail) { if (byT.has(c.t)) s.candles[byT.get(c.t)] = c; else s.candles.push(c); }
     if (s.candles.length > CANDLE_COUNT + 50) s.candles = s.candles.slice(-CANDLE_COUNT);
-    reevaluate(s, pair);
+    reevaluate(s, pair, tf);
     s.updatedAt = Date.now(); s.error = null;
   } catch (e) { s.error = e.message; }
   emit();
 }
 
-export function useMarket(pair) {
+export function useMarket(pair, tf = DEFAULT_TF) {
   useStore();
   useEffect(() => {
     if (!pair) return undefined;
-    const s = store.pairs[pair];
-    if (!s || (s.status === "error" && !s.loading)) load(pair);
-    const id = setInterval(() => refresh(pair), 60000);
+    const s = store.pairs[`${pair}|${tf}`];
+    if (!s || (s.status === "error" && !s.loading)) load(pair, tf);
+    const id = setInterval(() => refresh(pair, tf), 60000);
     return () => clearInterval(id);
-  }, [pair]);
-  return store.pairs[pair] || { status: "loading" };
+  }, [pair, tf]);
+  return store.pairs[`${pair}|${tf}`] || { status: "loading" };
 }
 
 let pollers = 0, timer = null;

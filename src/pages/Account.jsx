@@ -58,7 +58,7 @@ export default function Account() {
         <NumField label="Risk per trade" value={rules.risk_pct} onChange={(v) => setRules({ ...rules, risk_pct: v })} step={0.25} suffix="%" />
         <NumField label="Max open trades" value={rules.max_open_trades} onChange={(v) => setRules({ ...rules, max_open_trades: v })} step={1} />
         <Toggle label="Block correlated pairs" hint="Skip a signal that doubles exposure to a currency you already hold" checked={rules.block_correlated} onChange={(v) => setRules({ ...rules, block_correlated: v })} />
-        <Toggle label="London and New York sessions only" hint="7:00–21:00 UTC, weekdays" checked={rules.sessions_only} onChange={(v) => setRules({ ...rules, sessions_only: v })} />
+        <Toggle label="London and New York sessions only" hint="15-minute timeframe only: 7:00–21:00 UTC, weekdays" checked={rules.sessions_only} onChange={(v) => setRules({ ...rules, sessions_only: v })} />
         <NumField label="Trading day resets at" hint="UTC hour your firm uses (22 = 5 PM New York)" value={rules.daily_reset_hour_utc} onChange={(v) => setRules({ ...rules, daily_reset_hour_utc: v })} step={1} suffix="h" />
         {Object.keys(PAIRS).map((k) => (
           <div key={k} className="row">
@@ -159,7 +159,7 @@ function Security() {
 
 function ScannerStatus() {
   const d = useData();
-  if (!d.cursors.length) return <Note>The signal scanner starts within a few minutes of finishing setup. It checks every new 15-minute candle.</Note>;
+  if (!d.cursors.length) return <Note>The signal scanner starts within a few minutes of finishing setup. It checks every new candle on your timeframe.</Note>;
   return (
     <>
       <h2>Scanner</h2>

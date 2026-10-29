@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useData } from "../lib/data";
 import { useMarket, usePrices } from "../lib/market";
-import { regime, strategyStatus, inSession, PAIRS, fmtR } from "../engine/engine";
+import { regime, strategyStatus, inSession, PAIRS, fmtR, tfOf } from "../engine/engine";
 import PriceChart from "../components/PriceChart";
 import { Head, Card, Svg, VerdictChip, Loading, ErrorNote, Note, pairLabel, dirLabel, price, pct, when } from "../components/ui";
 
@@ -9,7 +9,8 @@ export default function Signals({ pairParam }) {
   const d = useData();
   const pairs = d.profile.pairs.filter((p) => PAIRS[p]);
   const pair = pairs.includes(pairParam) ? pairParam : pairs[0];
-  const m = useMarket(pair);
+  const tf = tfOf(d.profile.timeframe);
+  const m = useMarket(pair, tf.key);
   const { prices, error: priceErr } = usePrices(pairs);
   const [markKey, setMarkKey] = useState(null);
   const ev = m.ev;
@@ -21,7 +22,7 @@ export default function Signals({ pairParam }) {
   const markers = useMemo(() => (shown ? shown.allTrades.map((t) => ({ t: t.t, dir: t.dir, win: t.r > 0, label: t.r > 0 ? "W" : "L" })) : []), [shown]);
 
   const recent = d.signals.filter((s) => s.pair === pair).slice(0, 6);
-  const active = recent.find((s) => s.status === "active" && Date.now() - new Date(s.created_at) < 2 * 3600e3);
+  const active = recent.find((s) => s.status === "active" && Date.now() - new Date(s.created_at) < tfOf(s.granularity).expiryHours * 3600e3);
   const lines = active ? [
     { price: active.tp2, color: "#1E3A8A", title: "TP2" }, { price: active.tp1, color: "#2563EB", title: "TP1" },
     { price: active.entry, color: "#3D4652", title: "Entry" }, { price: active.sl, color: "#B45309", title: "SL" },
@@ -36,8 +37,8 @@ export default function Signals({ pairParam }) {
       </div>
       <div className="badges">
         {reg && <span className="badge">{reg.label} · ADX {Math.round(reg.adx)}</span>}
-        {reg && <span className="badge">4H trend: {reg.htf === "up" ? "Up" : "Down"}</span>}
-        <span className="badge">{inSession(Date.now()) ? "London / New York session" : "Outside main sessions"}</span>
+        {reg && <span className="badge">Trend ({reg.htfLabel}): {reg.htf === "up" ? "Up" : "Down"}</span>}
+        {tf.sessionFilter && <span className="badge">{inSession(Date.now()) ? "London / New York session" : "Outside main sessions"}</span>}
         {live && <span className="badge">Spread {live.spreadPips?.toFixed(1)} pips</span>}
         <span className="badge live">{priceErr ? "Prices paused" : "Live · OANDA"}</span>
       </div>
@@ -46,7 +47,7 @@ export default function Signals({ pairParam }) {
         <div className="col">
           <Card className="pad">
             <div className="card-head">
-              <span className="strong">{pairLabel(pair)} · 15m</span>
+              <span className="strong">{pairLabel(pair)} · {tf.label}</span>
               <span className="mono strong win">{live ? price(pair, live.mid) : "…"}</span>
             </div>
             {m.status === "loading" && <Loading text="Loading 5,000 candles…" />}
@@ -74,7 +75,7 @@ export default function Signals({ pairParam }) {
               <Svg name="chevron" color="var(--win-ink)" />
             </a>
           ) : (
-            <Note>No live signal on {pairLabel(pair)} right now.{cursor?.last_scan_at ? ` Last scan ${when(cursor.last_scan_at)}.` : " The scanner checks every new 15-minute candle."}{cursor?.last_error ? ` Scanner error: ${cursor.last_error}` : ""}</Note>
+            <Note>No live signal on {pairLabel(pair)} right now.{cursor?.last_scan_at ? ` Last scan ${when(cursor.last_scan_at)}.` : ` The scanner checks every new ${tf.long} candle.`}{cursor?.last_error ? ` Scanner error: ${cursor.last_error}` : ""}</Note>
           )}
 
           {recent.length > 0 && (

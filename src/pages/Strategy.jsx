@@ -1,15 +1,16 @@
 import { useMemo } from "react";
 import { useData } from "../lib/data";
 import { useMarket, usePrices } from "../lib/market";
-import { STRATEGIES, PAIRS, strategyStatus, fmtR } from "../engine/engine";
+import { STRATEGIES, PAIRS, strategyStatus, fmtR, tfOf, strategiesFor } from "../engine/engine";
 import PriceChart from "../components/PriceChart";
-import { Head, Card, Verdict, EquityCurve, Loading, ErrorNote, pairLabel, dirLabel, price, pct, when } from "../components/ui";
+import { Head, Card, Verdict, EquityCurve, Loading, ErrorNote, Note, pairLabel, dirLabel, price, pct, when } from "../components/ui";
 
 export default function Strategy({ stratKey, pairParam }) {
   const d = useData();
   const pairs = d.profile.pairs.filter((p) => PAIRS[p]);
   const pair = pairs.includes(pairParam) ? pairParam : pairs[0];
-  const m = useMarket(pair);
+  const tf = tfOf(d.profile.timeframe);
+  const m = useMarket(pair, tf.key);
   const { prices } = usePrices([pair]);
   const r = m.ev?.results.find((x) => x.key === stratKey);
   const status = useMemo(() => (m.ev ? strategyStatus(m.ev) : {}), [m.ev]);
@@ -29,14 +30,15 @@ export default function Strategy({ stratKey, pairParam }) {
     <div className="page narrow">
       <Head back={`#/?pair=${pair}`} sub={`${def.author} · ${def.style}`} title={def.name} />
       <div className="seg wide scroll" role="tablist" aria-label="Strategy">
-        {STRATEGIES.map((s) => <a key={s.key} role="tab" aria-selected={s.key === stratKey} className={s.key === stratKey ? "on" : ""} href={`#/strategy/${s.key}?pair=${pair}`}>{s.name}</a>)}
+        {strategiesFor(tf.key).map((s) => <a key={s.key} role="tab" aria-selected={s.key === stratKey} className={s.key === stratKey ? "on" : ""} href={`#/strategy/${s.key}?pair=${pair}`}>{s.name}</a>)}
       </div>
       <div className="seg wide" role="tablist" aria-label="Pair">
         {pairs.map((p) => <a key={p} role="tab" aria-selected={p === pair} className={p === pair ? "on" : ""} href={`#/strategy/${stratKey}?pair=${p}`}>{pairLabel(p)}</a>)}
       </div>
 
       {m.status === "error" && <ErrorNote>{m.error}</ErrorNote>}
-      {!r && m.status !== "error" && <Loading text="Backtesting on 5,000 candles…" />}
+      {!def.timeframes.includes(tf.key) && <Note tone="warn">{def.name} only works on shorter timeframes. Switch to 1-hour in setup to use it.</Note>}
+      {!r && m.status !== "error" && def.timeframes.includes(tf.key) && <Loading text="Backtesting on 5,000 candles…" />}
       {r && (
         <>
           <Verdict v={r.verdict}>{r.verdictText}</Verdict>
@@ -47,9 +49,9 @@ export default function Strategy({ stratKey, pairParam }) {
           </Card>
 
           <Card className="pad">
-            <div className="card-head"><span className="strong">Its signals on {pairLabel(pair)} · 15m</span><span className="small muted">{r.allTrades.length} signals</span></div>
+            <div className="card-head"><span className="strong">Its signals on {pairLabel(pair)} · {tf.label}</span><span className="small muted">{r.allTrades.length} signals</span></div>
             <PriceChart pair={pair} candles={m.candles} markers={markers} live={prices[pair]?.mid} height={280} bars={200} />
-            <div className="legend"><span><i className="dot win" />Win</span><span><i className="dot loss" />Loss</span><span className="small muted">Unseen data starts {when(m.ev.splitTime)}</span></div>
+            <div className="legend"><span><i className="dot win" />Win</span><span><i className="dot loss" />Loss</span><span className="small muted">Data from {when(m.ev.startTime)} · unseen from {when(m.ev.splitTime)}</span></div>
           </Card>
 
           <Card className="table">
